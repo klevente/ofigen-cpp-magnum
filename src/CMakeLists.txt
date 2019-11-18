@@ -1,5 +1,6 @@
 find_package(Corrade REQUIRED Main)
-find_package(Magnum REQUIRED GL
+find_package(Magnum REQUIRED
+        GL
         MeshTools
         Shaders
         SceneGraph

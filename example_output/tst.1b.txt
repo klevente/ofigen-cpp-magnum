@@ -1,0 +1,31 @@
+{"background":[
+  "location": [0.10, 30.00, 0.24],
+  "location_delta": [0.00, 0.00, 0.00],
+  "rotation_euler": {"value":[0.00, 0.00, 0.00], "order":"XYZ"},
+  "rotation_euler_delta": {"value":[0.00, 0.00, 0.00], "order":"XYZ"},
+  "background_file": "C:\Users\Szántó Mátyás\Desktop\ofigen\ofigen\Background\BACKGROUND_outside_5.jpg"
+]},
+{"camera":[
+  "location": [0.00, 0.00, 0.00],
+  "location_delta": [0.00, 0.00, 0.00],
+  "rotation_euler": {"value":[0.00, 0.00, 0.00], "order":"XYZ"}
+  "rotation_euler_delta": {"value":[0.00, 0.00, 0.00], "order":"XYZ"}
+]},
+{"targets":[
+    {"x_TRGT.BOX.10000013":[
+      "location": [-0.09, 25.33, 2.03],
+      "rotation_euler": {"value":[0.04, -0.13, 0.14], "order":"XYZ"},
+      "location_from_cam": [-0.09, 25.33, 2.03],
+      "location_delta": [0.00, 0.00, 0.00],
+      "rotation_euler_delta": {"value":[0.00, 0.00, 0.00], "order":"XYZ"},
+      "location_from_cam_delta": [-0.09, 25.33, 2.03]
+    ]},
+    {"x_TRGT.BOX.10000012":[
+      "location": [7.17, 24.43, 4.15],
+      "rotation_euler": {"value":[0.05, -0.07, 0.68], "order":"XYZ"},
+      "location_from_cam": [7.17, 24.43, 4.15],
+      "location_delta": [0.00, 0.00, 0.00],
+      "rotation_euler_delta": {"value":[0.00, 0.00, 0.00], "order":"XYZ"},
+      "location_from_cam_delta": [7.17, 24.43, 4.15]
+    ]},
+]}

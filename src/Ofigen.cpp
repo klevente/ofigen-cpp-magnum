@@ -128,7 +128,9 @@ Ofigen::Ofigen(const Arguments& arguments):
     Debug{} << "Opening file";
 
     /* Load file */
-    if(!importer->openFile("scene.glb"))
+    /*if(!importer->openFile("scene.glb"))
+        std::exit(4);*/
+    if (!importer->openFile("Lantern.glb"))
         std::exit(4);
 
     /* Load all textures. Textures that fail to load will be NullOpt. */
