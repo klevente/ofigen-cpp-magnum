@@ -89,12 +89,12 @@ Ofigen::Ofigen(const Arguments& arguments):
                 .setTitle("Magnum Viewer Example")
                 .setWindowFlags(Configuration::WindowFlag::Resizable)}
 {
-    /*Utility::Arguments args;
-    args.addArgument("file").setHelp("file", "file to load")
+    Utility::Arguments args;
+    args.addOption("file", "Lantern.glb").setHelp("file", "file to load")
             .addOption("importer", "AnySceneImporter").setHelp("importer", "importer plugin to use")
             .addSkippedPrefix("magnum", "engine-specific options")
             .setGlobalHelp("Displays a 3D scene file provided on command line.")
-            .parse(arguments.argc, arguments.argv);*/
+            .parse(arguments.argc, arguments.argv);
 
     /* Every scene needs a camera */
     _cameraObject
@@ -122,15 +122,13 @@ Ofigen::Ofigen(const Arguments& arguments):
 
     /* Load a scene importer plugin */
     PluginManager::Manager<Trade::AbstractImporter> manager;
-    Containers::Pointer<Trade::AbstractImporter> importer = manager.loadAndInstantiate("AnySceneImporter");
+    Containers::Pointer<Trade::AbstractImporter> importer = manager.loadAndInstantiate(args.value("importer"));
     if(!importer) std::exit(1);
 
     Debug{} << "Opening file";
 
     /* Load file */
-    /*if(!importer->openFile("scene.glb"))
-        std::exit(4);*/
-    if (!importer->openFile("Lantern.glb"))
+    if (!importer->openFile(args.value("file")))
         std::exit(4);
 
     /* Load all textures. Textures that fail to load will be NullOpt. */
@@ -192,7 +190,12 @@ Ofigen::Ofigen(const Arguments& arguments):
         Debug{} << "Importing mesh" << i << importer->mesh3DName(i);
 
         Containers::Optional<Trade::MeshData3D> meshData = importer->mesh3D(i);
-        if(!meshData || !meshData->hasNormals() || meshData->primitive() != MeshPrimitive::Triangles) {
+        /*if(!meshData || !meshData->hasNormals() || meshData->primitive() != MeshPrimitive::Triangles) {
+            Warning{} << "Cannot load the mesh, skipping";
+            continue;
+        }*/
+
+        if(!meshData || meshData->primitive() != MeshPrimitive::Triangles) {
             Warning{} << "Cannot load the mesh, skipping";
             continue;
         }
@@ -284,7 +287,7 @@ void TexturedDrawable::draw(const Matrix4& transformationMatrix, SceneGraph::Cam
 }
 
 void Ofigen::drawEvent() {
-    GL::defaultFramebuffer.clear(GL::FramebufferClear::Color|GL::FramebufferClear::Depth);
+    GL::defaultFramebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth);
 
     _camera->draw(_drawables);
 

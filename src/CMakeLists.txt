@@ -9,7 +9,7 @@ find_package(Magnum REQUIRED
 
 set_directory_properties(PROPERTIES CORRADE_USE_PEDANTIC_FLAGS ON)
 
-add_executable(OFIGEN WIN32 Ofigen.cpp)
+add_executable(OFIGEN WIN32 Ofigen.cpp ColoredDrawable.cpp ColoredDrawable.h TexturedDrawable.cpp TexturedDrawable.h MagnumTypes.h)
 target_link_libraries(OFIGEN PRIVATE
     Corrade::Main
     Magnum::Application
