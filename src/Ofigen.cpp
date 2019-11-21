@@ -26,11 +26,17 @@
 #include <Magnum/Trade/SceneData.h>
 #include <Magnum/Trade/TextureData.h>
 
+#include <json.hpp>
+
+#include "ColoredDrawable.h"
+#include "TexturedDrawable.h"
+
 using namespace Magnum;
 using namespace Math::Literals;
 
 using Object3D = SceneGraph::Object<SceneGraph::MatrixTransformation3D>;
 using Scene3D = SceneGraph::Scene<SceneGraph::MatrixTransformation3D>;
+using json = nlohmann::json;
 
 class Ofigen: public Platform::Application {
 public:
@@ -58,30 +64,6 @@ private:
     SceneGraph::Camera3D* _camera;
     SceneGraph::DrawableGroup3D _drawables;
     Vector3 _previousPosition;
-};
-
-class ColoredDrawable: public SceneGraph::Drawable3D {
-public:
-    explicit ColoredDrawable(Object3D& object, Shaders::Phong& shader, GL::Mesh& mesh, const Color4& color, SceneGraph::DrawableGroup3D& group): SceneGraph::Drawable3D{object, &group}, _shader(shader), _mesh(mesh), _color{color} {}
-
-private:
-    void draw(const Matrix4& transformationMatrix, SceneGraph::Camera3D& camera) override;
-
-    Shaders::Phong& _shader;
-    GL::Mesh& _mesh;
-    Color4 _color;
-};
-
-class TexturedDrawable: public SceneGraph::Drawable3D {
-public:
-    explicit TexturedDrawable(Object3D& object, Shaders::Phong& shader, GL::Mesh& mesh, GL::Texture2D& texture, SceneGraph::DrawableGroup3D& group): SceneGraph::Drawable3D{object, &group}, _shader(shader), _mesh(mesh), _texture(texture) {}
-
-private:
-    void draw(const Matrix4& transformationMatrix, SceneGraph::Camera3D& camera) override;
-
-    Shaders::Phong& _shader;
-    GL::Mesh& _mesh;
-    GL::Texture2D& _texture;
 };
 
 Ofigen::Ofigen(const Arguments& arguments):
@@ -262,28 +244,6 @@ void Ofigen::addObject(Trade::AbstractImporter& importer, Containers::ArrayView<
     /* Recursively add children */
     for(std::size_t id: objectData->children())
         addObject(importer, materials, *object, id);
-}
-
-void ColoredDrawable::draw(const Matrix4& transformationMatrix, SceneGraph::Camera3D& camera) {
-    _shader
-            .setDiffuseColor(_color)
-            .setLightPosition(camera.cameraMatrix().transformPoint({-3.0f, 10.0f, 10.0f}))
-            .setTransformationMatrix(transformationMatrix)
-            .setNormalMatrix(transformationMatrix.normalMatrix())
-            .setProjectionMatrix(camera.projectionMatrix());
-
-    _mesh.draw(_shader);
-}
-
-void TexturedDrawable::draw(const Matrix4& transformationMatrix, SceneGraph::Camera3D& camera) {
-    _shader
-            .setLightPosition(camera.cameraMatrix().transformPoint({-3.0f, 10.0f, 10.0f}))
-            .setTransformationMatrix(transformationMatrix)
-            .setNormalMatrix(transformationMatrix.normalMatrix())
-            .setProjectionMatrix(camera.projectionMatrix())
-            .bindDiffuseTexture(_texture);
-
-    _mesh.draw(_shader);
 }
 
 void Ofigen::drawEvent() {
