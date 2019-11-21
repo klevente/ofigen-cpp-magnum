@@ -60,7 +60,8 @@ private:
     Containers::Array<Containers::Optional<GL::Texture2D>> _textures;
 
     Scene3D _scene;
-    Object3D _manipulator, _cameraObject;
+    std::vector<Object3D> _objects;
+    Object3D _cameraObject;
     SceneGraph::Camera3D* _camera;
     SceneGraph::DrawableGroup3D _drawables;
     Vector3 _previousPosition;
@@ -88,7 +89,7 @@ Ofigen::Ofigen(const Arguments& arguments):
             .setViewport(GL::defaultFramebuffer.viewport().size());
 
     /* Base object, parent of all (for easy manipulation) */
-    _manipulator.setParent(&_scene);
+    // _manipulator.setParent(&_scene);
 
     /* Setup renderer and shader defaults */
     GL::Renderer::enable(GL::Renderer::Feature::DepthTest);
@@ -297,7 +298,7 @@ void Ofigen::mouseMoveEvent(MouseMoveEvent& event) {
 
     if(_previousPosition.length() < 0.001f || axis.length() < 0.001f) return;
 
-    _manipulator.rotate(Math::angle(_previousPosition, currentPosition), axis.normalized());
+    // _manipulator.rotate(Math::angle(_previousPosition, currentPosition), axis.normalized());
     _previousPosition = currentPosition;
 
     redraw();
