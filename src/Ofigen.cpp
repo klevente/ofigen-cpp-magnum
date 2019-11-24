@@ -1,4 +1,8 @@
+#include <string>
 #include <vector>
+#include <map>
+#include <filesystem>
+#include <functional>
 #include <Corrade/Containers/Array.h>
 #include <Corrade/Containers/Optional.h>
 #include <Corrade/PluginManager/Manager.h>
@@ -54,12 +58,20 @@ private:
 
     Vector3 positionOnSphere(const Vector2i& position) const;
 
+    void loadMeshesFromFolder(const std::string & foldername);
+    void loadMesh(Containers::Pointer<Trade::AbstractImporter> & importer, const std::string & filename);
     void addObject(Trade::AbstractImporter& importer, Containers::ArrayView<const Containers::Optional<Trade::PhongMaterialData>> materials, Object3D& parent, UnsignedInt i);
 
     Shaders::Phong _coloredShader,
             _texturedShader{Shaders::Phong::Flag::DiffuseTexture};
     Containers::Array<Containers::Optional<GL::Mesh>> _meshes;
     Containers::Array<Containers::Optional<GL::Texture2D>> _textures;
+
+    std::vector<std::string> _filenames;
+    std::map<std::string, Containers::Array<Containers::Optional<GL::Mesh>>> _meshMap;
+    std::map<std::string, Containers::Array<Containers::Optional<GL::Texture2D>>> _texturesMap;
+    std::map<std::string, Containers::Array<Containers::Optional<Trade::PhongMaterialData>>> _materialsMap;
+    std::map<std::string, std::vector<Containers::Pointer<Trade::ObjectData3D>>> _objectDataMap;
 
     Scene3D _scene;
     Object3D _manipulator, _cameraObject;
@@ -299,6 +311,125 @@ void Ofigen::mouseMoveEvent(MouseMoveEvent& event) {
     _previousPosition = currentPosition;
 
     redraw();
+}
+
+void Ofigen::loadMeshesFromFolder(const std::string & foldername) {
+    /* Load a scene importer plugin */
+    PluginManager::Manager<Trade::AbstractImporter> manager;
+    Containers::Pointer<Trade::AbstractImporter> importer = manager.loadAndInstantiate("AnySceneImporter");
+    if(!importer) {
+        std::exit(1);
+    }
+
+    namespace fs = std::filesystem;
+    const fs::path folder{foldername};
+    for (const auto & file : fs::directory_iterator{folder}) {
+        if (!file.is_directory()) {
+            const auto & filename = file.path().string();
+            _filenames.push_back(filename);
+            loadMesh(importer, filename);
+        }
+    }
+}
+
+void Ofigen::loadMesh(Containers::Pointer<Trade::AbstractImporter> & importer, const std::string & filename) {
+    Debug{} << "Opening file" << filename;
+    /* Load file */
+    if (!importer->openFile(filename)) {
+        std::exit(4);
+    }
+
+    const auto [textureIterator, textureSuccess] = _texturesMap.try_emplace(filename, importer->textureCount());
+    for (UnsignedInt i = 0; i < importer->textureCount(); i++) {
+        Debug{} << "Importing texture" << i << importer->textureName(i);
+
+        Containers::Optional<Trade::TextureData> textureData = importer->texture(i);
+        if (!textureData || textureData->type() != Trade::TextureData::Type::Texture2D) {
+            Warning{} << "Cannot load texture properties, skipping";
+            continue;
+        }
+
+        Debug{} << "Importing image" << textureData->image() << importer->image2DName(textureData->image());
+        Containers::Optional<Trade::ImageData2D> imageData = importer->image2D(textureData->image());
+        GL::TextureFormat format;
+        if (imageData && imageData->format() == PixelFormat::RGB8Unorm)
+            format = GL::TextureFormat::RGB8;
+        else if (imageData && imageData->format() == PixelFormat::RGBA8Unorm)
+            format = GL::TextureFormat::RGBA8;
+        else {
+            Warning{} << "Cannot load texture image, skipping";
+            continue;
+        }
+
+        /* Configure the texture */
+        GL::Texture2D texture;
+        texture
+                .setMagnificationFilter(textureData->magnificationFilter())
+                .setMinificationFilter(textureData->minificationFilter(), textureData->mipmapFilter())
+                .setWrapping(textureData->wrapping().xy())
+                .setStorage(Math::log2(imageData->size().max()) + 1, format, imageData->size())
+                .setSubImage(0, {}, *imageData)
+                .generateMipmap();
+
+        textureIterator->second[i] = std::move(texture);
+    }
+
+    /* Load all materials. Materials that fail to load will be NullOpt. */
+    const auto [materialIterator, materialSuccess] = _materialsMap.try_emplace(filename, importer->materialCount());
+    for (UnsignedInt i = 0; i < importer->materialCount(); i++) {
+        Debug{} << "Importing material" << i << importer->materialName(i);
+
+        Containers::Pointer<Trade::AbstractMaterialData> materialData = importer->material(i);
+        if (!materialData || materialData->type() != Trade::MaterialType::Phong) {
+            Warning{} << "Cannot load material, skipping";
+            continue;
+        }
+
+        materialIterator->second[i] = std::move(static_cast<Trade::PhongMaterialData&>(*materialData));
+    }
+
+    const auto [meshIterator, meshSuccess] = _meshMap.try_emplace(filename, importer->mesh3DCount());
+    for (UnsignedInt i = 0; i < importer->mesh3DCount(); i++) {
+        Debug{} << "Importing mesh" << i << importer->mesh3DName(i);
+        Containers::Optional<Trade::MeshData3D> meshData = importer->mesh3D(i);
+        if(!meshData || !meshData->hasNormals() || meshData->primitive() != MeshPrimitive::Triangles) {
+            Warning{} << "Cannot load the mesh, skipping";
+            continue;
+        }
+
+        /* Compile the mesh */
+        meshIterator->second[i] = MeshTools::compile(*meshData);
+    }
+
+    /* Load the scene */
+    if (importer->defaultScene() != -1) {
+        Debug{} << "Adding default scene" << importer->sceneName(importer->defaultScene());
+
+        Containers::Optional<Trade::SceneData> sceneData = importer->scene(importer->defaultScene());
+        if (!sceneData) {
+            Error{} << "Cannot load scene, exiting";
+            return;
+        }
+
+        const auto [objectDataIterator, objectDataSuccess] = _objectDataMap.try_emplace(filename);
+        std::vector<Containers::Pointer<Trade::ObjectData3D>> & objectVector = objectDataIterator->second;
+        std::function<void(UnsignedInt)> addObjectsToMap = [&](UnsignedInt objectId) -> void {
+            Debug{} << "Importing object" << objectId << importer->object3DName(objectId);
+            // maybe std::move object3d?
+            objectVector.push_back(importer->object3D(objectId));
+            if (!objectVector.back()) {
+                Error{} << "Cannot import object, skipping";
+                return;
+            }
+            for (auto id : objectVector.back()->children()) {
+                addObjectsToMap(id);
+            }
+        };
+
+        for (UnsignedInt objectId : sceneData->children3D()) {
+            addObjectsToMap(objectId);
+        }
+    }
 }
 
 MAGNUM_APPLICATION_MAIN(Ofigen)
