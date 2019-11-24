@@ -1,7 +1,10 @@
 #include "MovingObject.h"
-#include <Magnum/Math/Angle.h>
 
-MovingObject::MovingObject(Object3D * parent) : Object{parent} {}
+std::unique_ptr<MovingObject::Coefficients> MovingObject::_coeffs = nullptr;
+
+MovingObject::MovingObject(MovingObject * parent) : Object{parent}, _position{parent->_position}, _orientation{parent->_orientation} {
+    this->setTransformation(parent->transformation());
+}
 
 MovingObject::MovingObject(Scene3D &scene, const Vector3 &position, const Vector3 &orientation)
     : Object3D{}, _position{position}, _orientation(orientation) {
@@ -9,29 +12,20 @@ MovingObject::MovingObject(Scene3D &scene, const Vector3 &position, const Vector
 }
 
 void MovingObject::initCoefficients() {
-    // read config file
-    _coefficients.moveCoefficient = 1.0f;
-    _coefficients.rotationCoefficients = 1.0f;
-    _coefficients.moveConstraint_x = std::uniform_real_distribution<float>{0.0f, 1.0f};
-    _coefficients.moveConstraint_y = std::uniform_real_distribution<float>{0.0f, 1.0f};
-    _coefficients.moveConstraint_z = std::uniform_real_distribution<float>{0.0f, 1.0f};
-    _coefficients.rotationConstraint_x = std::uniform_real_distribution<float>{0.0f, 1.0f};
-    _coefficients.rotationConstraint_y = std::uniform_real_distribution<float>{0.0f, 1.0f};
-    _coefficients.rotationConstraint_z = std::uniform_real_distribution<float>{0.0f, 1.0f};
-
+    _coeffs = std::make_unique<Coefficients>(1.0f, 1.0f, Vector3{1.0f, 1.0f, 1.0f}, Vector3{1.0f, 1.0f, 1.0f});
 }
 
 void MovingObject::moveRandomly() {
     Vector3 translateDelta{
-        _coefficients.moveConstraint_x(_coefficients.mt),
-        _coefficients.moveConstraint_y(_coefficients.mt),
-        _coefficients.moveConstraint_z(_coefficients.mt)
+        _coeffs->moveConstraint_x(_coeffs->mt),
+        _coeffs->moveConstraint_y(_coeffs->mt),
+        _coeffs->moveConstraint_z(_coeffs->mt)
     };
 
     Vector3 rotateDelta{
-            _coefficients.rotationConstraint_x(_coefficients.mt),
-            _coefficients.rotationConstraint_y(_coefficients.mt),
-            _coefficients.rotationConstraint_z(_coefficients.mt)
+            _coeffs->rotationConstraint_x(_coeffs->mt),
+            _coeffs->rotationConstraint_y(_coeffs->mt),
+            _coeffs->rotationConstraint_z(_coeffs->mt)
     };
 
     _position += translateDelta;
@@ -42,3 +36,9 @@ void MovingObject::moveRandomly() {
     this->rotateY(Rad{rotateDelta.y()});
     this->rotateZ(Rad{rotateDelta.z()});
 }
+
+MovingObject::Coefficients::Coefficients(float moveCoefficient, float rotationCoefficient, const Vector3 &moveConstraint, const Vector3 &rotationConstraint)
+    : moveCoefficient{moveCoefficient}, rotationCoefficients{rotationCoefficient},
+    moveConstraint_x{0.0f, moveConstraint.x()}, moveConstraint_y{0.0f, moveConstraint.y()}, moveConstraint_z{0.0f, moveConstraint.z()},
+    rotationConstraint_x{0.0f, rotationConstraint.x()}, rotationConstraint_y{0.0f, rotationConstraint.y()}, rotationConstraint_z{0.0f, rotationConstraint.z()},
+    mt{std::random_device{}()} { }

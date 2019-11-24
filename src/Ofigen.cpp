@@ -1,3 +1,4 @@
+#include <vector>
 #include <Corrade/Containers/Array.h>
 #include <Corrade/Containers/Optional.h>
 #include <Corrade/PluginManager/Manager.h>
@@ -30,6 +31,7 @@
 
 #include "ColoredDrawable.h"
 #include "TexturedDrawable.h"
+#include "MovingObject.h"
 
 using namespace Magnum;
 using namespace Math::Literals;
@@ -60,10 +62,10 @@ private:
     Containers::Array<Containers::Optional<GL::Texture2D>> _textures;
 
     Scene3D _scene;
-    std::vector<Object3D> _objects;
-    Object3D _cameraObject;
+    Object3D _manipulator, _cameraObject;
     SceneGraph::Camera3D* _camera;
     SceneGraph::DrawableGroup3D _drawables;
+    std::vector<MovingObject> _objects;
     Vector3 _previousPosition;
 };
 
@@ -73,7 +75,7 @@ Ofigen::Ofigen(const Arguments& arguments):
                 .setWindowFlags(Configuration::WindowFlag::Resizable)}
 {
     Utility::Arguments args;
-    args.addOption("file", "Lantern.glb").setHelp("file", "file to load")
+    args.addArgument("file").setHelp("file", "file to load")
             .addOption("importer", "AnySceneImporter").setHelp("importer", "importer plugin to use")
             .addSkippedPrefix("magnum", "engine-specific options")
             .setGlobalHelp("Displays a 3D scene file provided on command line.")
@@ -89,7 +91,7 @@ Ofigen::Ofigen(const Arguments& arguments):
             .setViewport(GL::defaultFramebuffer.viewport().size());
 
     /* Base object, parent of all (for easy manipulation) */
-    // _manipulator.setParent(&_scene);
+    _manipulator.setParent(&_scene);
 
     /* Setup renderer and shader defaults */
     GL::Renderer::enable(GL::Renderer::Feature::DepthTest);
@@ -108,10 +110,10 @@ Ofigen::Ofigen(const Arguments& arguments):
     Containers::Pointer<Trade::AbstractImporter> importer = manager.loadAndInstantiate(args.value("importer"));
     if(!importer) std::exit(1);
 
-    Debug{} << "Opening file";
+    Debug{} << "Opening file" << args.value("file");
 
     /* Load file */
-    if (!importer->openFile(args.value("file")))
+    if(!importer->openFile(args.value("file")))
         std::exit(4);
 
     /* Load all textures. Textures that fail to load will be NullOpt. */
@@ -173,12 +175,7 @@ Ofigen::Ofigen(const Arguments& arguments):
         Debug{} << "Importing mesh" << i << importer->mesh3DName(i);
 
         Containers::Optional<Trade::MeshData3D> meshData = importer->mesh3D(i);
-        /*if(!meshData || !meshData->hasNormals() || meshData->primitive() != MeshPrimitive::Triangles) {
-            Warning{} << "Cannot load the mesh, skipping";
-            continue;
-        }*/
-
-        if(!meshData || meshData->primitive() != MeshPrimitive::Triangles) {
+        if(!meshData || !meshData->hasNormals() || meshData->primitive() != MeshPrimitive::Triangles) {
             Warning{} << "Cannot load the mesh, skipping";
             continue;
         }
@@ -248,7 +245,7 @@ void Ofigen::addObject(Trade::AbstractImporter& importer, Containers::ArrayView<
 }
 
 void Ofigen::drawEvent() {
-    GL::defaultFramebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth);
+    GL::defaultFramebuffer.clear(GL::FramebufferClear::Color|GL::FramebufferClear::Depth);
 
     _camera->draw(_drawables);
 
@@ -298,7 +295,7 @@ void Ofigen::mouseMoveEvent(MouseMoveEvent& event) {
 
     if(_previousPosition.length() < 0.001f || axis.length() < 0.001f) return;
 
-    // _manipulator.rotate(Math::angle(_previousPosition, currentPosition), axis.normalized());
+    _manipulator.rotate(Math::angle(_previousPosition, currentPosition), axis.normalized());
     _previousPosition = currentPosition;
 
     redraw();

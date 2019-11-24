@@ -12,6 +12,7 @@ set_directory_properties(PROPERTIES CORRADE_USE_PEDANTIC_FLAGS ON)
 include_directories(../include)
 
 add_executable(OFIGEN WIN32 Ofigen.cpp ColoredDrawable.cpp ColoredDrawable.h TexturedDrawable.cpp TexturedDrawable.h MagnumTypes.h MovingObject.cpp MovingObject.h)
+target_compile_features(OFIGEN PUBLIC cxx_std_17)
 target_link_libraries(OFIGEN PRIVATE
     Corrade::Main
     Magnum::Application
