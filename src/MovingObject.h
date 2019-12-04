@@ -7,12 +7,14 @@
 
 class MovingObject : public Object3D {
 public:
-    MovingObject(Scene3D& scene, const Vector3& position, const Vector3& orientation);
+    explicit MovingObject(Scene3D& scene, const Vector3& position = {}, const Vector3& orientation = {});
     explicit MovingObject(MovingObject * parent);
 
     static void initCoefficients();
 
     void moveRandomly();
+
+    void move(const Vector3 & v);
 private:
     Vector3 _position;
     Vector3 _orientation;

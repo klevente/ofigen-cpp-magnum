@@ -9,7 +9,7 @@
 
 class ColoredDrawable : public SceneGraph::Drawable3D {
 public:
-    explicit ColoredDrawable(Object3D& object, Shaders::Phong& shader, GL::Mesh& mesh, const Color4& color, SceneGraph::DrawableGroup3D& group): SceneGraph::Drawable3D{object, &group}, _shader(shader), _mesh(mesh), _color{color} {}
+    ColoredDrawable(Object3D& object, Shaders::Phong& shader, GL::Mesh& mesh, const Color4& color, SceneGraph::DrawableGroup3D& group);
 
 private:
     void draw(const Matrix4& transformationMatrix, SceneGraph::Camera3D& camera) override;

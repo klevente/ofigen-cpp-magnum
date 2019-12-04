@@ -16,16 +16,16 @@ void MovingObject::initCoefficients() {
 }
 
 void MovingObject::moveRandomly() {
-    Vector3 translateDelta{
+    Vector3 translateDelta {
         _coeffs->moveConstraint_x(_coeffs->mt),
         _coeffs->moveConstraint_y(_coeffs->mt),
         _coeffs->moveConstraint_z(_coeffs->mt)
     };
 
-    Vector3 rotateDelta{
-            _coeffs->rotationConstraint_x(_coeffs->mt),
-            _coeffs->rotationConstraint_y(_coeffs->mt),
-            _coeffs->rotationConstraint_z(_coeffs->mt)
+    Vector3 rotateDelta {
+        _coeffs->rotationConstraint_x(_coeffs->mt),
+        _coeffs->rotationConstraint_y(_coeffs->mt),
+        _coeffs->rotationConstraint_z(_coeffs->mt)
     };
 
     _position += translateDelta;
@@ -35,6 +35,11 @@ void MovingObject::moveRandomly() {
     this->rotateX(Rad{rotateDelta.x()});
     this->rotateY(Rad{rotateDelta.y()});
     this->rotateZ(Rad{rotateDelta.z()});
+}
+
+void MovingObject::move(const Vector3 & v) {
+    _position += v;
+    this->translate(v);
 }
 
 MovingObject::Coefficients::Coefficients(float moveCoefficient, float rotationCoefficient, const Vector3 &moveConstraint, const Vector3 &rotationConstraint)

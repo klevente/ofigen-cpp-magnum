@@ -1,5 +1,6 @@
 #include <string>
 #include <vector>
+#include <array>
 #include <map>
 #include <filesystem>
 #include <functional>
@@ -31,11 +32,21 @@
 #include <Magnum/Trade/SceneData.h>
 #include <Magnum/Trade/TextureData.h>
 
+#include <Magnum/Shaders/Flat.h>
+#include <Magnum/Primitives/Plane.h>
+#include <Magnum/GL/Framebuffer.h>
+#include <Magnum/GL/Renderbuffer.h>
+#include <Magnum/GL/RenderbufferFormat.h>
+#include <Magnum/Image.h>
+
 #include <json.hpp>
+#include <png++/png.hpp>
 
 #include "ColoredDrawable.h"
 #include "TexturedDrawable.h"
+#include "BackgroundDrawable.h"
 #include "MovingObject.h"
+#include "ObjectData.h"
 
 using namespace Magnum;
 using namespace Math::Literals;
@@ -44,7 +55,7 @@ using Object3D = SceneGraph::Object<SceneGraph::MatrixTransformation3D>;
 using Scene3D = SceneGraph::Scene<SceneGraph::MatrixTransformation3D>;
 using json = nlohmann::json;
 
-class Ofigen: public Platform::Application {
+class Ofigen : public Platform::Application {
 public:
     explicit Ofigen(const Arguments& arguments);
 
@@ -56,11 +67,19 @@ private:
     void mouseMoveEvent(MouseMoveEvent& event) override;
     void mouseScrollEvent(MouseScrollEvent& event) override;
 
-    Vector3 positionOnSphere(const Vector2i& position) const;
+    [[nodiscard]] Vector3 positionOnSphere(const Vector2i& position) const;
 
     void loadMeshesFromFolder(const std::string & foldername);
     void loadMesh(Containers::Pointer<Trade::AbstractImporter> & importer, const std::string & filename);
     void addObject(Trade::AbstractImporter& importer, Containers::ArrayView<const Containers::Optional<Trade::PhongMaterialData>> materials, Object3D& parent, UnsignedInt i);
+    void addObjectToScene(const std::string & name, const Vector3 & position = {});
+    void loadBackground(const std::string & filename);
+    void addBackgroundToScene(const Vector3 & position = {});
+
+    void exitEvent(ExitEvent &) override;
+
+    void keyPressEvent(KeyEvent &event) override;
+
 
     Shaders::Phong _coloredShader,
             _texturedShader{Shaders::Phong::Flag::DiffuseTexture};
@@ -71,20 +90,32 @@ private:
     std::map<std::string, Containers::Array<Containers::Optional<GL::Mesh>>> _meshMap;
     std::map<std::string, Containers::Array<Containers::Optional<GL::Texture2D>>> _texturesMap;
     std::map<std::string, Containers::Array<Containers::Optional<Trade::PhongMaterialData>>> _materialsMap;
-    std::map<std::string, std::vector<Containers::Pointer<Trade::ObjectData3D>>> _objectDataMap;
+    std::map<std::string, ObjectData> _objectDataMap;
 
     Scene3D _scene;
-    Object3D _manipulator, _cameraObject;
+    MovingObject _manipulator, _cameraObject;
     SceneGraph::Camera3D* _camera;
     SceneGraph::DrawableGroup3D _drawables;
-    std::vector<MovingObject> _objects;
+    std::vector<MovingObject *> _objects;
     Vector3 _previousPosition;
+
+    Shaders::Flat3D _backgroundShader{Shaders::Flat3D::Flag::Textured};
+    GL::Mesh _backgroundMesh;
+    GL::Texture2D _backgroundTexture;
+    MovingObject _backgroundObject;
+
+    Vector2i frameBufferSize{4096, 4096};
+    GL::Texture2D colorStencil;
+    GL::Renderbuffer depthStencil;
+    GL::Framebuffer framebuffer{{{}, frameBufferSize}};
 };
 
 Ofigen::Ofigen(const Arguments& arguments):
         Platform::Application{arguments, Configuration{}
                 .setTitle("Magnum Viewer Example")
-                .setWindowFlags(Configuration::WindowFlag::Resizable)}
+                .setWindowFlags(Configuration::WindowFlag::Resizable)},
+                _manipulator{_scene}, _cameraObject{_scene},
+                _backgroundObject{_scene}
 {
     Utility::Arguments args;
     args.addArgument("file").setHelp("file", "file to load")
@@ -93,10 +124,16 @@ Ofigen::Ofigen(const Arguments& arguments):
             .setGlobalHelp("Displays a 3D scene file provided on command line.")
             .parse(arguments.argc, arguments.argv);
 
-    /* Every scene needs a camera */
-    _cameraObject
+    MovingObject::initCoefficients();
+
+
+    /*_cameraObject
             .setParent(&_scene)
-            .translate(Vector3::zAxis(5.0f));
+            .translate(Vector3::zAxis(5.0f));*/
+    /* Every scene needs a camera */
+    _cameraObject.move(Vector3::zAxis(5.0f));
+    // _cameraObject.move({0, 0, 5});
+
     (*(_camera = new SceneGraph::Camera3D{_cameraObject}))
             .setAspectRatioPolicy(SceneGraph::AspectRatioPolicy::Extend)
             .setProjectionMatrix(Matrix4::perspectiveProjection(35.0_degf, 1.0f, 0.01f, 1000.0f))
@@ -117,18 +154,28 @@ Ofigen::Ofigen(const Arguments& arguments):
             .setSpecularColor(0x111111_rgbf)
             .setShininess(80.0f);
 
-    /* Load a scene importer plugin */
+    colorStencil.setStorage(1, GL::TextureFormat::RGBA8, frameBufferSize);
+    depthStencil.setStorage(GL::RenderbufferFormat::Depth24Stencil8, frameBufferSize);
+    framebuffer.attachTexture(GL::Framebuffer::ColorAttachment{0}, colorStencil, 0);
+    framebuffer.attachRenderbuffer(GL::Framebuffer::BufferAttachment::DepthStencil, depthStencil);
+
+    loadBackground("BACKGROUND_inside_2.jpg");
+    loadMeshesFromFolder("models");
+
+    addBackgroundToScene({0, 0, -100});
+    addObjectToScene(_filenames.front());
+    // addObjectToScene(_filenames.front(), {50.0f, 0.0f, 0.0f});
+
+    /*
     PluginManager::Manager<Trade::AbstractImporter> manager;
     Containers::Pointer<Trade::AbstractImporter> importer = manager.loadAndInstantiate(args.value("importer"));
     if(!importer) std::exit(1);
 
     Debug{} << "Opening file" << args.value("file");
 
-    /* Load file */
     if(!importer->openFile(args.value("file")))
         std::exit(4);
 
-    /* Load all textures. Textures that fail to load will be NullOpt. */
     _textures = Containers::Array<Containers::Optional<GL::Texture2D>>{importer->textureCount()};
     for(UnsignedInt i = 0; i != importer->textureCount(); ++i) {
         Debug{} << "Importing texture" << i << importer->textureName(i);
@@ -152,7 +199,7 @@ Ofigen::Ofigen(const Arguments& arguments):
             continue;
         }
 
-        /* Configure the texture */
+
         GL::Texture2D texture;
         texture
                 .setMagnificationFilter(textureData->magnificationFilter())
@@ -165,9 +212,7 @@ Ofigen::Ofigen(const Arguments& arguments):
         _textures[i] = std::move(texture);
     }
 
-    /* Load all materials. Materials that fail to load will be NullOpt. The
-       data will be stored directly in objects later, so save them only
-       temporarily. */
+
     Containers::Array<Containers::Optional<Trade::PhongMaterialData>> materials{importer->materialCount()};
     for(UnsignedInt i = 0; i != importer->materialCount(); ++i) {
         Debug{} << "Importing material" << i << importer->materialName(i);
@@ -181,7 +226,7 @@ Ofigen::Ofigen(const Arguments& arguments):
         materials[i] = std::move(static_cast<Trade::PhongMaterialData&>(*materialData));
     }
 
-    /* Load all meshes. Meshes that fail to load will be NullOpt. */
+
     _meshes = Containers::Array<Containers::Optional<GL::Mesh>>{importer->mesh3DCount()};
     for(UnsignedInt i = 0; i != importer->mesh3DCount(); ++i) {
         Debug{} << "Importing mesh" << i << importer->mesh3DName(i);
@@ -192,11 +237,11 @@ Ofigen::Ofigen(const Arguments& arguments):
             continue;
         }
 
-        /* Compile the mesh */
+
         _meshes[i] = MeshTools::compile(*meshData);
     }
 
-    /* Load the scene */
+
     if(importer->defaultScene() != -1) {
         Debug{} << "Adding default scene" << importer->sceneName(importer->defaultScene());
 
@@ -206,14 +251,14 @@ Ofigen::Ofigen(const Arguments& arguments):
             return;
         }
 
-        /* Recursively add all children */
+
         for(UnsignedInt objectId: sceneData->children3D())
             addObject(*importer, materials, _manipulator, objectId);
 
-        /* The format has no scene support, display just the first loaded mesh with
-           a default material and be done with it */
+
     } else if(!_meshes.empty() && _meshes[0])
         new ColoredDrawable{_manipulator, _coloredShader, *_meshes[0], 0xffffff_rgbf, _drawables};
+    */
 }
 
 void Ofigen::addObject(Trade::AbstractImporter& importer, Containers::ArrayView<const Containers::Optional<Trade::PhongMaterialData>> materials, Object3D& parent, UnsignedInt i) {
@@ -257,11 +302,13 @@ void Ofigen::addObject(Trade::AbstractImporter& importer, Containers::ArrayView<
 }
 
 void Ofigen::drawEvent() {
-    GL::defaultFramebuffer.clear(GL::FramebufferClear::Color|GL::FramebufferClear::Depth);
+    GL::defaultFramebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth)
+        .bind();
 
     _camera->draw(_drawables);
 
     swapBuffers();
+    // redraw();
 }
 
 void Ofigen::viewportEvent(ViewportEvent& event) {
@@ -412,23 +459,148 @@ void Ofigen::loadMesh(Containers::Pointer<Trade::AbstractImporter> & importer, c
         }
 
         const auto [objectDataIterator, objectDataSuccess] = _objectDataMap.try_emplace(filename);
-        std::vector<Containers::Pointer<Trade::ObjectData3D>> & objectVector = objectDataIterator->second;
-        std::function<void(UnsignedInt)> addObjectsToMap = [&](UnsignedInt objectId) -> void {
-            Debug{} << "Importing object" << objectId << importer->object3DName(objectId);
+        ObjectData & objectVector = objectDataIterator->second;
+
+        std::function<void(UnsignedInt)> addChildObjects = [&](UnsignedInt objectId) -> void {
+            Debug{} << "Importing child object" << objectId << importer->object3DName(objectId);
             // maybe std::move object3d?
-            objectVector.push_back(importer->object3D(objectId));
-            if (!objectVector.back()) {
-                Error{} << "Cannot import object, skipping";
+            objectVector.childrenObjects.emplace_back(std::move(importer->object3D(objectId)));
+            if (!objectVector.childrenObjects.back()) {
+                Error{} << "Cannot import child object, skipping";
                 return;
             }
-            for (auto id : objectVector.back()->children()) {
-                addObjectsToMap(id);
+            for (UnsignedInt childId : objectVector.childrenObjects.back()->children()) {
+                addChildObjects(childId);
             }
         };
 
         for (UnsignedInt objectId : sceneData->children3D()) {
-            addObjectsToMap(objectId);
+            Debug{} << "Importing root object" << objectId << importer->object3DName(objectId);
+            objectVector.rootObjects.emplace_back(std::move(importer->object3D(objectId)));
+            if (!objectVector.rootObjects.back()) {
+                Error{} << "Cannot import child object, skipping";
+                continue;
+            }
+            Debug{} << "Adding child objects:" << objectVector.rootObjects.back()->children().size();
+            for (UnsignedInt childId : objectVector.rootObjects.back()->children()) {
+                addChildObjects(childId);
+            }
         }
+    }
+}
+
+void Ofigen::addObjectToScene(const std::string & name, const Vector3 & position) {
+    Debug{} << "Adding" << name << "to scene";
+
+    auto & meshes = _meshMap[name];
+    auto & textures = _texturesMap[name];
+    auto & materials = _materialsMap[name];
+    auto & objectDatas = _objectDataMap[name];
+
+    std::function<void(Containers::Pointer<Trade::ObjectData3D> &, MovingObject *)> addSubObjectToScene =
+            [&] (Containers::Pointer<Trade::ObjectData3D> & objectData, MovingObject * parent) {
+
+        MovingObject * object = parent;
+        /* Add a drawable if the object has a mesh and the mesh is loaded */
+        if (objectData->instanceType() == Trade::ObjectInstanceType3D::Mesh && objectData->instance() !=  -1 && meshes[objectData->instance()]) {
+            object = new MovingObject{parent};
+            auto materialId = static_cast<Trade::MeshObjectData3D*>(objectData.get())->material();
+
+            /* Material not available / not loaded, use a default material */
+            if (materialId == -1 || !materials[materialId]) {
+                new ColoredDrawable{*object, _coloredShader, *meshes[objectData->instance()], 0xffffff_rgbf, _drawables};
+            /* Textured material. If the texture failed to load, again just use a
+           default colored material. */
+            } else if (materials[materialId]->flags() & Trade::PhongMaterialData::Flag::DiffuseTexture) {
+                auto & texture = textures[materials[materialId]->diffuseTexture()];
+
+                if (texture) {
+                    new TexturedDrawable{*object, _texturedShader, *meshes[objectData->instance()], *texture, _drawables};
+                } else {
+                    new ColoredDrawable{*object, _coloredShader, *meshes[objectData->instance()], 0xffffff_rgbf, _drawables};
+                }
+            }
+        } /*else {
+            new ColoredDrawable{*object, _coloredShader, *meshes[objectData->instance()], 0xffffff_rgbf, _drawables};
+        }*/
+
+        for (auto id : objectData->children()) {
+            auto & child = objectDatas.childrenObjects[id];
+            addSubObjectToScene(child, object);
+        }
+    };
+
+    auto * manipulatorObject = new MovingObject{&_manipulator};
+    manipulatorObject->move(position);
+    _objects.push_back(manipulatorObject);
+    for (auto & od : objectDatas.rootObjects) {
+        addSubObjectToScene(od, manipulatorObject);
+    }
+
+
+}
+
+void Ofigen::exitEvent(Platform::Sdl2Application::ExitEvent &) {
+    std::exit(0);
+}
+
+void Ofigen::loadBackground(const std::string & filename) {
+    Debug{} << "Loading background image";
+    PluginManager::Manager<Trade::AbstractImporter> manager;
+    Containers::Pointer<Trade::AbstractImporter> importer = manager.loadAndInstantiate("AnyImageImporter");
+    if (!importer) {
+        std::exit(1);
+    }
+    if (!importer->openFile(filename)) {
+        std::exit(4);
+    }
+
+    Containers::Optional<Trade::ImageData2D> image = importer->image2D(0);
+    CORRADE_INTERNAL_ASSERT(image);
+    Debug{} << "Importing background" << importer->image2DName(0);
+    _backgroundTexture.setWrapping(GL::SamplerWrapping::ClampToEdge)
+        .setMagnificationFilter(GL::SamplerFilter::Linear)
+        .setMinificationFilter(GL::SamplerFilter::Linear)
+        .setStorage(1, GL::textureFormat(image->format()), image->size())
+        .setSubImage(0, {}, *image);
+
+    _backgroundMesh = MeshTools::compile(Primitives::planeSolid(Primitives::PlaneTextureCoords::Generate));
+}
+
+void Ofigen::addBackgroundToScene(const Vector3 &position) {
+    Debug{} << "Adding background to scene";
+    _backgroundObject.scale({100, 100, 1});
+    _backgroundObject.move(position);
+    new BackgroundDrawable{_backgroundObject, _backgroundShader, _backgroundMesh, _backgroundTexture, _drawables};
+
+}
+
+void Ofigen::keyPressEvent(Platform::Sdl2Application::KeyEvent &event) {
+    if (event.key() == KeyEvent::Key::Space) {
+        framebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth)
+            .bind();
+
+        _camera->draw(_drawables);
+
+        Magnum::Image2D image{PixelFormat::RGB8I};
+        colorStencil.image(0, image);
+
+        png::image<png::rgb_pixel> pngImage{4096, 4096};
+
+        auto pixels = image.pixels<Color3ub>();
+
+        std::size_t x = 0, y = 0;
+        for (auto row : pixels) {
+            for (auto & pixel : row) {
+                // Debug{} << pixel;
+                pngImage.set_pixel(x, y, png::rgb_pixel{pixel.r(), pixel.b(), pixel.b()});
+                x++;
+            }
+            y++;
+            x = 0;
+        }
+
+        pngImage.write("out.png");
     }
 }
 
