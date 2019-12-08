@@ -74,7 +74,27 @@ void MovingObject::writeData(json & objectArray, const Vector3 & oldPos, const V
                       {"x", dO.x()},
                       {"y", dO.y()},
                       {"z", dO.z()}, }
-                }
+                },
+                {"old_position", {
+                      {"x", oldPos.x()},
+                      {"y", oldPos.y()},
+                      {"z", oldPos.z()},}
+                },
+                {"new_position", {
+                      {"x", _position.x()},
+                      {"y", _position.y()},
+                      {"z", _position.z()},}
+                },
+                {"old_orientation", {
+                      {"x", oldOrient.x()},
+                      {"y", oldOrient.y()},
+                      {"z", oldOrient.z()},}
+                },
+                {"new_orientation", {
+                      {"x", _orientation.x()},
+                      {"y", _orientation.y()},
+                      {"z", _orientation.z()},}
+                },
         }
     );
 }

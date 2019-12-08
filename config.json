@@ -6,20 +6,20 @@
     "object_placement_min": {
         "x": -10,
         "y": -10,
-        "z": -10
+        "z": -50
     },
     "object_placement_max": {
         "x": 10,
         "y": 10,
-        "z": 10
+        "z": 0
     },
-    "object_move_coeff": 1,
+    "object_move_coeff": 0.1,
     "object_move_constraint": {
         "x": 1,
         "y": 1,
         "z": 1
     },
-    "object_rot_coeff": 1,
+    "object_rot_coeff": 0.1,
     "object_rot_constraint": {
         "x": 1,
         "y": 1,

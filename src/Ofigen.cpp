@@ -117,7 +117,7 @@ private:
 
 Ofigen::Ofigen(const Arguments& arguments):
         Platform::Application{arguments, Configuration{}
-                .setTitle("Magnum Viewer Example")
+                .setTitle("OFIGEN-cpp")
                 .setWindowFlags(Configuration::WindowFlag::Resizable)},
                 _manipulator{_scene}, _cameraObject{_scene},
                 _backgroundObject{_scene}
@@ -125,10 +125,10 @@ Ofigen::Ofigen(const Arguments& arguments):
     Utility::Arguments args;
     args.addArgument("config").setHelp("config", "Config file to load")
             .addSkippedPrefix("magnum", "engine-specific options")
-            .setGlobalHelp("Displays a 3D scene file provided on command line.")
+            .setGlobalHelp("Create training data for neural networks learning optical flow")
             .parse(arguments.argc, arguments.argv);
 
-    _cameraObject.move(Vector3::zAxis(50.0f));
+    _cameraObject.move(Vector3::zAxis(70.0f));
 
     (*(_camera = new SceneGraph::Camera3D{_cameraObject}))
             .setAspectRatioPolicy(SceneGraph::AspectRatioPolicy::Extend)
@@ -171,6 +171,19 @@ Ofigen::Ofigen(const Arguments& arguments):
 void Ofigen::drawEvent() {
     GL::defaultFramebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth)
         .bind();
+
+    static bool first = true;
+
+    if (first) {
+        moveObjects();
+        Magnum::Image2D image{PixelFormat::RGB8Unorm};
+        _camera->draw(_drawables);
+        GL::defaultFramebuffer.read(GL::defaultFramebuffer.viewport(), image);
+        swapBuffers();
+        redraw();
+        first = false;
+        return;
+    }
 
     moveObjects();
     _camera->draw(_drawables);
@@ -387,25 +400,25 @@ void Ofigen::loadMesh(Containers::Pointer<Trade::AbstractImporter> & importer, c
         std::function<void(UnsignedInt)> addChildObjects = [&](UnsignedInt objectId) -> void {
             Debug{} << "Importing child object" << objectId << importer->object3DName(objectId);
             // maybe std::move object3d?
-            objectVector.childrenObjects.emplace_back(std::move(importer->object3D(objectId)));
-            if (!objectVector.childrenObjects.back()) {
+            objectVector.childrenObjects.try_emplace(objectId, std::move(importer->object3D(objectId)));
+            if (!objectVector.childrenObjects[objectId]) {
                 Error{} << "Cannot import child object, skipping";
                 return;
             }
-            for (UnsignedInt childId : objectVector.childrenObjects.back()->children()) {
+            for (UnsignedInt childId : objectVector.childrenObjects[objectId]->children()) {
                 addChildObjects(childId);
             }
         };
 
         for (UnsignedInt objectId : sceneData->children3D()) {
             Debug{} << "Importing root object" << objectId << importer->object3DName(objectId);
-            objectVector.rootObjects.emplace_back(std::move(importer->object3D(objectId)));
-            if (!objectVector.rootObjects.back()) {
-                Error{} << "Cannot import child object, skipping";
+            objectVector.rootObjects.try_emplace(objectId, std::move(importer->object3D(objectId)));
+            if (!objectVector.rootObjects[objectId]) {
+                Error{} << "Cannot import root object, skipping";
                 continue;
             }
-            Debug{} << "Adding child objects:" << objectVector.rootObjects.back()->children().size();
-            for (UnsignedInt childId : objectVector.rootObjects.back()->children()) {
+            Debug{} << "Adding child objects:" << objectVector.rootObjects[objectId]->children().size();
+            for (UnsignedInt childId : objectVector.rootObjects[objectId]->children()) {
                 addChildObjects(childId);
             }
         }
@@ -456,7 +469,7 @@ void Ofigen::addObjectToScene(const std::string & name, const Vector3 & position
     _objects.push_back(manipulatorObject);
     manipulatorObject->setName(name + '_' + std::to_string(_objects.size() - 1));
     for (auto & od : objectDatas.rootObjects) {
-        addSubObjectToScene(od, manipulatorObject);
+        addSubObjectToScene(od.second, manipulatorObject);
     }
 
 
