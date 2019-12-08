@@ -36,8 +36,6 @@
 
 #include <Magnum/Shaders/Flat.h>
 #include <Magnum/Primitives/Plane.h>
-#include <Magnum/GL/Framebuffer.h>
-#include <Magnum/GL/Renderbuffer.h>
 #include <Magnum/GL/RenderbufferFormat.h>
 #include <Magnum/Image.h>
 
@@ -79,6 +77,7 @@ private:
     void loadBackground(const std::string & filename);
     void addBackgroundToScene(const Vector3 & position = {});
     void moveObjects();
+    void writeImage();
 
     void exitEvent(ExitEvent &) override;
 
@@ -114,13 +113,6 @@ private:
     GL::Mesh _backgroundMesh;
     GL::Texture2D _backgroundTexture;
     MovingObject _backgroundObject;
-
-    Vector2i _frameBufferSize;
-    GL::Texture2D _colorStencil;
-    GL::Renderbuffer _colorBuffer;
-    GL::Renderbuffer _depthStencil;
-    GL::Framebuffer _framebuffer{{{}, _frameBufferSize}};
-
 };
 
 Ofigen::Ofigen(const Arguments& arguments):
@@ -136,12 +128,7 @@ Ofigen::Ofigen(const Arguments& arguments):
             .setGlobalHelp("Displays a 3D scene file provided on command line.")
             .parse(arguments.argc, arguments.argv);
 
-    /*_cameraObject
-            .setParent(&_scene)
-            .translate(Vector3::zAxis(5.0f));*/
-    /* Every scene needs a camera */
-    _cameraObject.move(Vector3::zAxis(5.0f));
-    // _cameraObject.move({0, 0, 5});
+    _cameraObject.move(Vector3::zAxis(50.0f));
 
     (*(_camera = new SceneGraph::Camera3D{_cameraObject}))
             .setAspectRatioPolicy(SceneGraph::AspectRatioPolicy::Extend)
@@ -162,22 +149,6 @@ Ofigen::Ofigen(const Arguments& arguments):
             .setAmbientColor(0x111111_rgbf)
             .setSpecularColor(0x111111_rgbf)
             .setShininess(80.0f);
-
-
-    _frameBufferSize = GL::defaultFramebuffer.viewport().size();
-    _colorStencil.setWrapping(GL::SamplerWrapping::ClampToEdge)
-        .setMagnificationFilter(GL::SamplerFilter::Linear)
-        .setMinificationFilter(GL::SamplerFilter::Linear);
-    _colorStencil.setStorage(1, GL::TextureFormat::RGBA8, _frameBufferSize);
-    _depthStencil.setStorage(GL::RenderbufferFormat::Depth24Stencil8, _frameBufferSize);
-    // _framebuffer.attachTexture(GL::Framebuffer::ColorAttachment{0}, _colorStencil, 0);
-    _colorBuffer.setStorage(GL::RenderbufferFormat::RGBA8, _frameBufferSize);
-    _framebuffer.attachRenderbuffer(GL::Framebuffer::ColorAttachment{0}, _colorBuffer);
-    _framebuffer.attachRenderbuffer(GL::Framebuffer::BufferAttachment::DepthStencil, _depthStencil);
-
-    _framebuffer.mapForDraw({
-        {0, {GL::Framebuffer::ColorAttachment{0}}}
-    });
 
     loadConfig(args.value("config"));
 
@@ -201,10 +172,16 @@ void Ofigen::drawEvent() {
     GL::defaultFramebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth)
         .bind();
 
+    moveObjects();
     _camera->draw(_drawables);
-
     swapBuffers();
-    // redraw();
+    writeImage();
+    _currentIteration++;
+    if (_currentIteration > _numOfIterations) {
+        std::exit(0);
+    }
+
+    redraw();
 }
 
 void Ofigen::viewportEvent(ViewportEvent& event) {
@@ -466,9 +443,7 @@ void Ofigen::addObjectToScene(const std::string & name, const Vector3 & position
                     new ColoredDrawable{*object, _coloredShader, *meshes[objectData->instance()], 0xffffff_rgbf, _drawables};
                 }
             }
-        } /*else {
-            new ColoredDrawable{*object, _coloredShader, *meshes[objectData->instance()], 0xffffff_rgbf, _drawables};
-        }*/
+        }
 
         for (auto id : objectData->children()) {
             auto & child = objectDatas.childrenObjects[id];
@@ -525,18 +500,12 @@ void Ofigen::addBackgroundToScene(const Vector3 &position) {
 void Ofigen::keyPressEvent(Platform::Sdl2Application::KeyEvent &event) {
     if (event.key() == KeyEvent::Key::Space) {
         Magnum::Image2D image{PixelFormat::RGB8Unorm};
-        /*_framebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth)
-       .bind();*/
 
         _camera->draw(_drawables);
 
-        GL::defaultFramebuffer.read({{}, _frameBufferSize}, image);
+        GL::defaultFramebuffer.read(GL::defaultFramebuffer.viewport(), image);
 
-        // _framebuffer.read({{}, _frameBufferSize}, image);
-
-        // _colorStencil.image(0, image);
-
-        png::image<png::rgb_pixel> pngImage{static_cast<unsigned int>(_frameBufferSize.x()), static_cast<unsigned int>(_frameBufferSize.y())};
+        png::image<png::rgb_pixel> pngImage{static_cast<unsigned int>(GL::defaultFramebuffer.viewport().sizeX()), static_cast<unsigned int>(GL::defaultFramebuffer.viewport().sizeY())};
 
         auto pixels = image.pixels<Color3ub>();
 
@@ -545,7 +514,7 @@ void Ofigen::keyPressEvent(Platform::Sdl2Application::KeyEvent &event) {
             for (auto & pixel : row) {
                 // Debug{} << pixel;
                 auto yInv = pngImage.get_height() - 1 - y;
-                pngImage.set_pixel(x, yInv, png::rgb_pixel{pixel.r(), pixel.b(), pixel.b()});
+                pngImage.set_pixel(x, yInv, png::rgb_pixel{pixel.r(), pixel.g(), pixel.b()});
                 x++;
             }
             y++;
@@ -571,9 +540,27 @@ void Ofigen::moveObjects() {
     std::ofstream ofstream{_outFolderName + '\\' + _outFileName + '_' + std::to_string(_currentIteration) + ".json"};
 
     ofstream << std::setw(4) << jsonData;
+}
 
+void Ofigen::writeImage() {
+    Magnum::Image2D image{PixelFormat::RGB8Unorm};
 
-    _currentIteration++;
+    GL::defaultFramebuffer.read(GL::defaultFramebuffer.viewport(), image);
+    png::image<png::rgb_pixel> pngImage{static_cast<unsigned int>(GL::defaultFramebuffer.viewport().sizeX()), static_cast<unsigned int>(GL::defaultFramebuffer.viewport().sizeY())};
+    auto pixels = image.pixels<Color3ub>();
+
+    std::size_t x = 0, y = 0;
+    for (auto row : pixels) {
+        for (auto & pixel : row) {
+            auto yInv = pngImage.get_height() - 1 - y;
+            pngImage.set_pixel(x, yInv, png::rgb_pixel{pixel.r(), pixel.g(), pixel.b()});
+            x++;
+        }
+        y++;
+        x = 0;
+    }
+
+    pngImage.write(_outFolderName + '\\' + _outFileName + '_' + std::to_string(_currentIteration) + ".png");
 }
 
 MAGNUM_APPLICATION_MAIN(Ofigen)
