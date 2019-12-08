@@ -26,3 +26,5 @@ add_custom_target(plugins ALL DEPENDS
         MagnumPlugins::TinyGltfImporter)
 
 add_subdirectory(src)
+
+configure_file(${PROJECT_SOURCE_DIR}/models/config.json ${CMAKE_CURRENT_BINARY_DIR}/Debug/bin/config.json COPYONLY)

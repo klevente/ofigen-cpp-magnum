@@ -1,9 +1,11 @@
 #include <string>
 #include <vector>
-#include <array>
+#include <random>
 #include <map>
 #include <filesystem>
 #include <functional>
+#include <fstream>
+#include <iomanip>
 #include <Corrade/Containers/Array.h>
 #include <Corrade/Containers/Optional.h>
 #include <Corrade/PluginManager/Manager.h>
@@ -69,17 +71,26 @@ private:
 
     [[nodiscard]] Vector3 positionOnSphere(const Vector2i& position) const;
 
+    void loadConfig(const std::string & filename);
     void loadMeshesFromFolder(const std::string & foldername);
     void loadMesh(Containers::Pointer<Trade::AbstractImporter> & importer, const std::string & filename);
-    void addObject(Trade::AbstractImporter& importer, Containers::ArrayView<const Containers::Optional<Trade::PhongMaterialData>> materials, Object3D& parent, UnsignedInt i);
+
     void addObjectToScene(const std::string & name, const Vector3 & position = {});
     void loadBackground(const std::string & filename);
     void addBackgroundToScene(const Vector3 & position = {});
+    void moveObjects();
 
     void exitEvent(ExitEvent &) override;
 
     void keyPressEvent(KeyEvent &event) override;
 
+    Vector3 _minPoint, _maxPoint;
+    unsigned int _numOfObjects;
+    unsigned int _numOfIterations;
+    std::string _outFolderName;
+    std::string _outFileName;
+
+    unsigned int _currentIteration = 0;
 
     Shaders::Phong _coloredShader,
             _texturedShader{Shaders::Phong::Flag::DiffuseTexture};
@@ -104,10 +115,12 @@ private:
     GL::Texture2D _backgroundTexture;
     MovingObject _backgroundObject;
 
-    Vector2i frameBufferSize{4096, 4096};
-    GL::Texture2D colorStencil;
-    GL::Renderbuffer depthStencil;
-    GL::Framebuffer framebuffer{{{}, frameBufferSize}};
+    Vector2i _frameBufferSize;
+    GL::Texture2D _colorStencil;
+    GL::Renderbuffer _colorBuffer;
+    GL::Renderbuffer _depthStencil;
+    GL::Framebuffer _framebuffer{{{}, _frameBufferSize}};
+
 };
 
 Ofigen::Ofigen(const Arguments& arguments):
@@ -118,14 +131,10 @@ Ofigen::Ofigen(const Arguments& arguments):
                 _backgroundObject{_scene}
 {
     Utility::Arguments args;
-    args.addArgument("file").setHelp("file", "file to load")
-            .addOption("importer", "AnySceneImporter").setHelp("importer", "importer plugin to use")
+    args.addArgument("config").setHelp("config", "Config file to load")
             .addSkippedPrefix("magnum", "engine-specific options")
             .setGlobalHelp("Displays a 3D scene file provided on command line.")
             .parse(arguments.argc, arguments.argv);
-
-    MovingObject::initCoefficients();
-
 
     /*_cameraObject
             .setParent(&_scene)
@@ -154,151 +163,38 @@ Ofigen::Ofigen(const Arguments& arguments):
             .setSpecularColor(0x111111_rgbf)
             .setShininess(80.0f);
 
-    colorStencil.setStorage(1, GL::TextureFormat::RGBA8, frameBufferSize);
-    depthStencil.setStorage(GL::RenderbufferFormat::Depth24Stencil8, frameBufferSize);
-    framebuffer.attachTexture(GL::Framebuffer::ColorAttachment{0}, colorStencil, 0);
-    framebuffer.attachRenderbuffer(GL::Framebuffer::BufferAttachment::DepthStencil, depthStencil);
 
-    loadBackground("BACKGROUND_inside_2.jpg");
-    loadMeshesFromFolder("models");
+    _frameBufferSize = GL::defaultFramebuffer.viewport().size();
+    _colorStencil.setWrapping(GL::SamplerWrapping::ClampToEdge)
+        .setMagnificationFilter(GL::SamplerFilter::Linear)
+        .setMinificationFilter(GL::SamplerFilter::Linear);
+    _colorStencil.setStorage(1, GL::TextureFormat::RGBA8, _frameBufferSize);
+    _depthStencil.setStorage(GL::RenderbufferFormat::Depth24Stencil8, _frameBufferSize);
+    // _framebuffer.attachTexture(GL::Framebuffer::ColorAttachment{0}, _colorStencil, 0);
+    _colorBuffer.setStorage(GL::RenderbufferFormat::RGBA8, _frameBufferSize);
+    _framebuffer.attachRenderbuffer(GL::Framebuffer::ColorAttachment{0}, _colorBuffer);
+    _framebuffer.attachRenderbuffer(GL::Framebuffer::BufferAttachment::DepthStencil, _depthStencil);
+
+    _framebuffer.mapForDraw({
+        {0, {GL::Framebuffer::ColorAttachment{0}}}
+    });
+
+    loadConfig(args.value("config"));
+
+    std::filesystem::create_directories(_outFolderName);
 
     addBackgroundToScene({0, 0, -100});
-    addObjectToScene(_filenames.front());
-    // addObjectToScene(_filenames.front(), {50.0f, 0.0f, 0.0f});
 
-    /*
-    PluginManager::Manager<Trade::AbstractImporter> manager;
-    Containers::Pointer<Trade::AbstractImporter> importer = manager.loadAndInstantiate(args.value("importer"));
-    if(!importer) std::exit(1);
+    std::mt19937 mt{std::random_device{}()};
+    std::uniform_real_distribution<float> xPos{_minPoint.x(), _maxPoint.x()};
+    std::uniform_real_distribution<float> yPos{_minPoint.y(), _maxPoint.y()};
+    std::uniform_real_distribution<float> zPos{_minPoint.z(), _maxPoint.z()};
 
-    Debug{} << "Opening file" << args.value("file");
+    std::uniform_int_distribution<unsigned int> index{0, _filenames.size() - 1};
 
-    if(!importer->openFile(args.value("file")))
-        std::exit(4);
-
-    _textures = Containers::Array<Containers::Optional<GL::Texture2D>>{importer->textureCount()};
-    for(UnsignedInt i = 0; i != importer->textureCount(); ++i) {
-        Debug{} << "Importing texture" << i << importer->textureName(i);
-
-        Containers::Optional<Trade::TextureData> textureData = importer->texture(i);
-        if(!textureData || textureData->type() != Trade::TextureData::Type::Texture2D) {
-            Warning{} << "Cannot load texture properties, skipping";
-            continue;
-        }
-
-        Debug{} << "Importing image" << textureData->image() << importer->image2DName(textureData->image());
-
-        Containers::Optional<Trade::ImageData2D> imageData = importer->image2D(textureData->image());
-        GL::TextureFormat format;
-        if(imageData && imageData->format() == PixelFormat::RGB8Unorm)
-            format = GL::TextureFormat::RGB8;
-        else if(imageData && imageData->format() == PixelFormat::RGBA8Unorm)
-            format = GL::TextureFormat::RGBA8;
-        else {
-            Warning{} << "Cannot load texture image, skipping";
-            continue;
-        }
-
-
-        GL::Texture2D texture;
-        texture
-                .setMagnificationFilter(textureData->magnificationFilter())
-                .setMinificationFilter(textureData->minificationFilter(), textureData->mipmapFilter())
-                .setWrapping(textureData->wrapping().xy())
-                .setStorage(Math::log2(imageData->size().max()) + 1, format, imageData->size())
-                .setSubImage(0, {}, *imageData)
-                .generateMipmap();
-
-        _textures[i] = std::move(texture);
+    for (unsigned int i = 0; i < _numOfObjects; i++) {
+        addObjectToScene(_filenames[index(mt)], {xPos(mt), yPos(mt), zPos(mt)});
     }
-
-
-    Containers::Array<Containers::Optional<Trade::PhongMaterialData>> materials{importer->materialCount()};
-    for(UnsignedInt i = 0; i != importer->materialCount(); ++i) {
-        Debug{} << "Importing material" << i << importer->materialName(i);
-
-        Containers::Pointer<Trade::AbstractMaterialData> materialData = importer->material(i);
-        if(!materialData || materialData->type() != Trade::MaterialType::Phong) {
-            Warning{} << "Cannot load material, skipping";
-            continue;
-        }
-
-        materials[i] = std::move(static_cast<Trade::PhongMaterialData&>(*materialData));
-    }
-
-
-    _meshes = Containers::Array<Containers::Optional<GL::Mesh>>{importer->mesh3DCount()};
-    for(UnsignedInt i = 0; i != importer->mesh3DCount(); ++i) {
-        Debug{} << "Importing mesh" << i << importer->mesh3DName(i);
-
-        Containers::Optional<Trade::MeshData3D> meshData = importer->mesh3D(i);
-        if(!meshData || !meshData->hasNormals() || meshData->primitive() != MeshPrimitive::Triangles) {
-            Warning{} << "Cannot load the mesh, skipping";
-            continue;
-        }
-
-
-        _meshes[i] = MeshTools::compile(*meshData);
-    }
-
-
-    if(importer->defaultScene() != -1) {
-        Debug{} << "Adding default scene" << importer->sceneName(importer->defaultScene());
-
-        Containers::Optional<Trade::SceneData> sceneData = importer->scene(importer->defaultScene());
-        if(!sceneData) {
-            Error{} << "Cannot load scene, exiting";
-            return;
-        }
-
-
-        for(UnsignedInt objectId: sceneData->children3D())
-            addObject(*importer, materials, _manipulator, objectId);
-
-
-    } else if(!_meshes.empty() && _meshes[0])
-        new ColoredDrawable{_manipulator, _coloredShader, *_meshes[0], 0xffffff_rgbf, _drawables};
-    */
-}
-
-void Ofigen::addObject(Trade::AbstractImporter& importer, Containers::ArrayView<const Containers::Optional<Trade::PhongMaterialData>> materials, Object3D& parent, UnsignedInt i) {
-    Debug{} << "Importing object" << i << importer.object3DName(i);
-    Containers::Pointer<Trade::ObjectData3D> objectData = importer.object3D(i);
-    if(!objectData) {
-        Error{} << "Cannot import object, skipping";
-        return;
-    }
-
-    /* Add the object to the scene and set its transformation */
-    auto* object = new Object3D{&parent};
-    object->setTransformation(objectData->transformation());
-
-    /* Add a drawable if the object has a mesh and the mesh is loaded */
-    if(objectData->instanceType() == Trade::ObjectInstanceType3D::Mesh && objectData->instance() != -1 && _meshes[objectData->instance()]) {
-        const Int materialId = static_cast<Trade::MeshObjectData3D*>(objectData.get())->material();
-
-        /* Material not available / not loaded, use a default material */
-        if(materialId == -1 || !materials[materialId]) {
-            new ColoredDrawable{*object, _coloredShader, *_meshes[objectData->instance()], 0xffffff_rgbf, _drawables};
-
-            /* Textured material. If the texture failed to load, again just use a
-               default colored material. */
-        } else if(materials[materialId]->flags() & Trade::PhongMaterialData::Flag::DiffuseTexture) {
-            Containers::Optional<GL::Texture2D>& texture = _textures[materials[materialId]->diffuseTexture()];
-            if(texture)
-                new TexturedDrawable{*object, _texturedShader, *_meshes[objectData->instance()], *texture, _drawables};
-            else
-                new ColoredDrawable{*object, _coloredShader, *_meshes[objectData->instance()], 0xffffff_rgbf, _drawables};
-
-            /* Color-only material */
-        } else {
-            new ColoredDrawable{*object, _coloredShader, *_meshes[objectData->instance()], materials[materialId]->diffuseColor(), _drawables};
-        }
-    }
-
-    /* Recursively add children */
-    for(std::size_t id: objectData->children())
-        addObject(importer, materials, *object, id);
 }
 
 void Ofigen::drawEvent() {
@@ -358,6 +254,56 @@ void Ofigen::mouseMoveEvent(MouseMoveEvent& event) {
     _previousPosition = currentPosition;
 
     redraw();
+}
+
+void Ofigen::loadConfig(const std::string & filename) {
+    std::ifstream i{filename};
+    json j;
+    i >> j;
+
+    _numOfIterations = j["num_of_iterations"].get<unsigned int>();
+    auto backgroundName = j["background_name"].get<std::string>();
+    loadBackground(backgroundName);
+    auto modelFolder = j["models_folder"].get<std::string>();
+    loadMeshesFromFolder(modelFolder);
+    _numOfObjects = j["num_of_objects"].get<unsigned int>();
+
+    static const char * objPlacementMin = "object_placement_min";
+    static const char * objPlacementMax = "object_placement_max";
+
+    _minPoint = {
+            j[objPlacementMin]["x"].get<float>(),
+            j[objPlacementMin]["y"].get<float>(),
+            j[objPlacementMin]["z"].get<float>()
+    };
+
+    _maxPoint = {
+            j[objPlacementMax]["x"].get<float>(),
+            j[objPlacementMax]["y"].get<float>(),
+            j[objPlacementMax]["z"].get<float>()
+    };
+
+    static const char * moveConstraintStr = "object_move_constraint";
+    static const char * rotConstraintStr = "object_rot_constraint";
+
+    float moveCoeff{ j["object_move_coeff"].get<float>() };
+    Vector3 moveConstraint{
+        j[moveConstraintStr]["x"].get<float>(),
+        j[moveConstraintStr]["y"].get<float>(),
+        j[moveConstraintStr]["z"].get<float>()
+    };
+
+    float rotCoeff{ j["object_rot_coeff"].get<float>() };
+    Vector3 rotConstraint{
+            j[rotConstraintStr]["x"].get<float>(),
+            j[rotConstraintStr]["y"].get<float>(),
+            j[rotConstraintStr]["z"].get<float>()
+    };
+
+    MovingObject::initCoefficients(moveCoeff, rotCoeff, moveConstraint, rotConstraint);
+
+    _outFolderName = j["out_folder"].get<std::string>();
+    _outFileName = j["out_file"].get<std::string>();
 }
 
 void Ofigen::loadMeshesFromFolder(const std::string & foldername) {
@@ -533,6 +479,7 @@ void Ofigen::addObjectToScene(const std::string & name, const Vector3 & position
     auto * manipulatorObject = new MovingObject{&_manipulator};
     manipulatorObject->move(position);
     _objects.push_back(manipulatorObject);
+    manipulatorObject->setName(name + '_' + std::to_string(_objects.size() - 1));
     for (auto & od : objectDatas.rootObjects) {
         addSubObjectToScene(od, manipulatorObject);
     }
@@ -577,15 +524,19 @@ void Ofigen::addBackgroundToScene(const Vector3 &position) {
 
 void Ofigen::keyPressEvent(Platform::Sdl2Application::KeyEvent &event) {
     if (event.key() == KeyEvent::Key::Space) {
-        framebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth)
-            .bind();
+        Magnum::Image2D image{PixelFormat::RGB8Unorm};
+        /*_framebuffer.clear(GL::FramebufferClear::Color | GL::FramebufferClear::Depth)
+       .bind();*/
 
         _camera->draw(_drawables);
 
-        Magnum::Image2D image{PixelFormat::RGB8I};
-        colorStencil.image(0, image);
+        GL::defaultFramebuffer.read({{}, _frameBufferSize}, image);
 
-        png::image<png::rgb_pixel> pngImage{4096, 4096};
+        // _framebuffer.read({{}, _frameBufferSize}, image);
+
+        // _colorStencil.image(0, image);
+
+        png::image<png::rgb_pixel> pngImage{static_cast<unsigned int>(_frameBufferSize.x()), static_cast<unsigned int>(_frameBufferSize.y())};
 
         auto pixels = image.pixels<Color3ub>();
 
@@ -593,7 +544,8 @@ void Ofigen::keyPressEvent(Platform::Sdl2Application::KeyEvent &event) {
         for (auto row : pixels) {
             for (auto & pixel : row) {
                 // Debug{} << pixel;
-                pngImage.set_pixel(x, y, png::rgb_pixel{pixel.r(), pixel.b(), pixel.b()});
+                auto yInv = pngImage.get_height() - 1 - y;
+                pngImage.set_pixel(x, yInv, png::rgb_pixel{pixel.r(), pixel.b(), pixel.b()});
                 x++;
             }
             y++;
@@ -602,6 +554,26 @@ void Ofigen::keyPressEvent(Platform::Sdl2Application::KeyEvent &event) {
 
         pngImage.write("out.png");
     }
+    if (event.key() == KeyEvent::Key::M) {
+        moveObjects();
+        redraw();
+    }
+}
+
+void Ofigen::moveObjects() {
+    json jsonData;
+    jsonData["iteration"] = _currentIteration;
+    jsonData["objectData"] = json::array();
+    for (const auto & obj : _objects) {
+        obj->moveRandomly(jsonData["objectData"]);
+    }
+
+    std::ofstream ofstream{_outFolderName + '\\' + _outFileName + '_' + std::to_string(_currentIteration) + ".json"};
+
+    ofstream << std::setw(4) << jsonData;
+
+
+    _currentIteration++;
 }
 
 MAGNUM_APPLICATION_MAIN(Ofigen)
